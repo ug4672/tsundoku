@@ -8,8 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
       "Photograph your bookshelf, get recommendations from books you actually own.",
     start_url: "/",
     display: "standalone",
-    background_color: "#fafafa",
-    theme_color: "#000000",
+    background_color: "#fdfaf3",
+    theme_color: "#7c3a1e",
     icons: [
       {
         src: "/icon",

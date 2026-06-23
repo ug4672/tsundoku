@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 type Confidence = "high" | "medium" | "low";
 type Mode = "next" | "shadow";
@@ -24,6 +24,8 @@ type Recommendation = {
 const MAX_FAVORITES = 5;
 
 export default function Home() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
 
@@ -39,14 +41,18 @@ export default function Home() {
   const [recsMode, setRecsMode] = useState<Mode | null>(null);
   const [recs, setRecs] = useState<Recommendation[] | null>(null);
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const next = e.target.files?.[0] ?? null;
+  function reset() {
     setBooks(null);
     setRecs(null);
     setRecsMode(null);
     setFavoriteIndices(new Set());
     setScanError(null);
     setRecsError(null);
+  }
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const next = e.target.files?.[0] ?? null;
+    reset();
     setFile(next);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(next ? URL.createObjectURL(next) : null);
@@ -129,200 +135,306 @@ export default function Home() {
   const favoritesCount = favoriteIndices.size;
 
   return (
-    <main className="flex min-h-screen flex-col items-center bg-zinc-50 px-4 py-10 dark:bg-black sm:px-6 sm:py-14">
-      <div className="w-full max-w-2xl flex flex-col gap-10">
-        <header className="flex flex-col items-center gap-3 text-center">
-          <div className="text-4xl">📚</div>
-          <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-zinc-50">
-            Tsundoku
-          </h1>
-          <p className="text-zinc-600 dark:text-zinc-400 max-w-sm">
-            Photograph a bookshelf. Get safe next reads — or a shadow library of
-            books your taste implies but you&apos;d never find on your own.
-          </p>
-        </header>
+    <div className="flex min-h-screen flex-col">
+      <main className="flex-1 flex flex-col items-center px-4 pt-12 pb-20 sm:px-6 sm:pt-16">
+        <div className="w-full max-w-2xl flex flex-col gap-14">
+          <Hero />
 
-        <section className="flex flex-col gap-4">
-          <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Bookshelf photo
-            </span>
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleFile}
-              className="block w-full text-sm text-zinc-600 file:mr-4 file:rounded-full file:border-0 file:bg-black file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-zinc-800 dark:text-zinc-300 dark:file:bg-zinc-50 dark:file:text-black"
-            />
-          </label>
+          {!file && !books && <HowItWorks />}
 
-          {previewUrl && (
-            <div className="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={previewUrl}
-                alt="Bookshelf preview"
-                className="w-full max-h-80 object-contain bg-zinc-100 dark:bg-zinc-900"
-              />
-            </div>
-          )}
+          <UploadZone
+            previewUrl={previewUrl}
+            fileName={file?.name ?? null}
+            onPick={() => fileInputRef.current?.click()}
+            onExtract={handleExtract}
+            extracting={scanLoading}
+            hasResults={Boolean(books)}
+          />
 
-          <button
-            type="button"
-            onClick={handleExtract}
-            disabled={!file || scanLoading}
-            className="flex h-12 w-full items-center justify-center rounded-full bg-black text-white font-medium transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-50 dark:text-black dark:hover:bg-zinc-200"
-          >
-            {scanLoading ? "Reading spines…" : "Extract books"}
-          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFile}
+            className="hidden"
+          />
 
           {scanError && <ErrorBox message={scanError} />}
-        </section>
 
-        {books && (
-          <section className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
-              <h2 className="text-lg font-medium text-black dark:text-zinc-50">
-                Found {books.length} {books.length === 1 ? "book" : "books"}
-              </h2>
-              {books.length > 0 && (
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                  Tap the heart on up to {MAX_FAVORITES} books you love — they
-                  become taste anchors for the recommendations.
-                  {favoritesCount > 0 &&
-                    ` ${favoritesCount}/${MAX_FAVORITES} selected.`}
-                </p>
-              )}
-            </div>
+          {scanLoading && <BookListSkeleton />}
 
-            {books.length === 0 ? (
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                No books detected. Try a closer shot with even lighting.
-              </p>
-            ) : (
-              <>
-                <ul className="flex flex-col gap-2">
-                  {books.map((book, i) => {
-                    const isFav = favoriteIndices.has(i);
-                    const canStillFav =
-                      isFav || favoritesCount < MAX_FAVORITES;
-                    return (
-                      <li
-                        key={`${book.title}-${i}`}
-                        className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => toggleFavorite(i)}
-                          disabled={!canStillFav}
-                          aria-label={
-                            isFav ? "Remove from favorites" : "Mark as favorite"
-                          }
-                          className={`shrink-0 mt-0.5 text-xl leading-none transition ${
-                            isFav
-                              ? "opacity-100"
-                              : canStillFav
-                                ? "opacity-30 hover:opacity-70"
-                                : "opacity-15 cursor-not-allowed"
-                          }`}
-                        >
-                          {isFav ? "❤️" : "🤍"}
-                        </button>
-                        <div className="flex flex-col flex-1 min-w-0">
-                          <span className="font-medium text-black dark:text-zinc-50">
-                            {book.title}
-                          </span>
-                          {book.author && (
-                            <span className="text-sm text-zinc-600 dark:text-zinc-400">
-                              {book.author}
-                            </span>
-                          )}
-                        </div>
-                        <ConfidenceBadge level={book.confidence} />
-                      </li>
-                    );
-                  })}
-                </ul>
+          {books && !scanLoading && (
+            <BooksSection
+              books={books}
+              favoriteIndices={favoriteIndices}
+              favoritesCount={favoritesCount}
+              onToggleFavorite={toggleFavorite}
+              mode={mode}
+              onModeChange={setMode}
+              onRecommend={handleRecommend}
+              recsLoading={recsLoading}
+            />
+          )}
 
-                <div className="flex flex-col gap-3">
-                  <ModeToggle mode={mode} onChange={setMode} />
+          {recsError && <ErrorBox message={recsError} />}
 
-                  <button
-                    type="button"
-                    onClick={handleRecommend}
-                    disabled={recsLoading}
-                    className="flex h-12 w-full items-center justify-center rounded-full border-2 border-black text-black font-medium transition-colors hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-50 dark:text-zinc-50 dark:hover:bg-zinc-50 dark:hover:text-black"
-                  >
-                    {recsLoading
-                      ? mode === "shadow"
-                        ? "Finding the gap…"
-                        : "Finding your next reads…"
-                      : mode === "shadow"
-                        ? "Build my shadow library"
-                        : "Recommend next reads"}
-                  </button>
-                </div>
+          {recsLoading && <RecsSkeleton />}
 
-                {recsError && <ErrorBox message={recsError} />}
-              </>
-            )}
-          </section>
-        )}
+          {recs && !recsLoading && (
+            <RecsSection mode={recsMode ?? mode} recs={recs} />
+          )}
+        </div>
+      </main>
 
-        {recs && recs.length > 0 && (
-          <section className="flex flex-col gap-4">
-            <h2 className="text-lg font-medium text-black dark:text-zinc-50">
-              {recsMode === "shadow"
-                ? `Your shadow library · ${recs.length}`
-                : `Your next ${recs.length} reads`}
-            </h2>
-            <ul className="flex flex-col gap-3">
-              {recs.map((rec, i) => (
-                <li
-                  key={`${rec.title}-${i}`}
-                  className="flex gap-4 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
-                >
-                  <div className="shrink-0 w-20 h-28 bg-zinc-100 dark:bg-zinc-800 rounded-md overflow-hidden flex items-center justify-center">
-                    {rec.cover_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={rec.cover_url}
-                        alt={`Cover of ${rec.title}`}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span className="text-xs text-zinc-400">No cover</span>
-                    )}
-                  </div>
-                  <div className="flex flex-col gap-1 min-w-0">
-                    <h3 className="font-medium text-black dark:text-zinc-50 leading-tight">
-                      {rec.title}
-                    </h3>
-                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                      {rec.author}
-                      {rec.first_publish_year ? ` · ${rec.first_publish_year}` : ""}
-                    </p>
-                    <p className="text-sm text-zinc-700 dark:text-zinc-300 mt-1 leading-snug">
-                      {rec.why}
-                    </p>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-500 mt-1 italic">
-                      Bridge: {rec.bridge_title}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+      <Footer />
+    </div>
+  );
+}
 
-        {recs && recs.length === 0 && (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            No recommendations made it through validation. Try again with a
-            larger shelf for better signal.
-          </p>
-        )}
+function Hero() {
+  return (
+    <header className="flex flex-col items-center gap-5 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-3xl shadow-sm">
+        📚
       </div>
-    </main>
+      <div className="flex flex-col gap-3">
+        <h1 className="font-serif text-5xl font-semibold tracking-tight text-[var(--foreground)] sm:text-6xl">
+          Tsundoku
+        </h1>
+        <p className="text-base text-[var(--foreground-muted)] sm:text-lg max-w-md">
+          Photograph your bookshelf. Get safe next reads — or a{" "}
+          <span className="font-serif italic text-[var(--accent)]">
+            shadow library
+          </span>{" "}
+          of books your taste implies you&apos;d love but you&apos;d never find on your own.
+        </p>
+      </div>
+    </header>
+  );
+}
+
+function HowItWorks() {
+  const steps = [
+    {
+      n: "1",
+      title: "Photograph your shelf",
+      body: "One clear shot of any bookshelf. Phone camera is fine.",
+    },
+    {
+      n: "2",
+      title: "Tap your favorites",
+      body: "Mark up to 5 books you love. They anchor your taste.",
+    },
+    {
+      n: "3",
+      title: "Get a shadow library",
+      body: "Safe next reads — or surprising picks across genres.",
+    },
+  ];
+  return (
+    <section className="grid gap-4 sm:grid-cols-3">
+      {steps.map((step) => (
+        <div
+          key={step.n}
+          className="flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5"
+        >
+          <span className="font-serif text-3xl font-medium text-[var(--accent)] leading-none">
+            {step.n}
+          </span>
+          <h3 className="font-medium text-[var(--foreground)]">{step.title}</h3>
+          <p className="text-sm text-[var(--foreground-muted)] leading-snug">
+            {step.body}
+          </p>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function UploadZone({
+  previewUrl,
+  fileName,
+  onPick,
+  onExtract,
+  extracting,
+  hasResults,
+}: {
+  previewUrl: string | null;
+  fileName: string | null;
+  onPick: () => void;
+  onExtract: () => void;
+  extracting: boolean;
+  hasResults: boolean;
+}) {
+  return (
+    <section className="flex flex-col gap-4">
+      <button
+        type="button"
+        onClick={onPick}
+        className="group relative flex min-h-48 w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-[var(--border)] bg-[var(--surface)] p-6 text-center transition-colors hover:border-[var(--accent)] hover:bg-[var(--accent-soft)]"
+      >
+        {previewUrl ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewUrl}
+              alt="Bookshelf preview"
+              className="max-h-72 w-full rounded-lg object-contain"
+            />
+            <p className="text-xs text-[var(--foreground-muted)]">
+              {fileName} · tap to change
+            </p>
+          </>
+        ) : (
+          <>
+            <span className="text-3xl">📷</span>
+            <div className="flex flex-col gap-1">
+              <p className="font-medium text-[var(--foreground)]">
+                Tap to photograph or upload
+              </p>
+              <p className="text-sm text-[var(--foreground-muted)]">
+                JPG or PNG · phone camera recommended
+              </p>
+            </div>
+          </>
+        )}
+      </button>
+
+      {previewUrl && !hasResults && (
+        <button
+          type="button"
+          onClick={onExtract}
+          disabled={extracting}
+          className="flex h-12 w-full items-center justify-center rounded-full bg-[var(--accent)] text-white font-medium transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {extracting ? "Reading spines…" : "Extract books"}
+        </button>
+      )}
+    </section>
+  );
+}
+
+function BookListSkeleton() {
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="shimmer h-6 w-40 rounded-md" />
+      <div className="flex flex-col gap-2">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="shimmer h-16 w-full rounded-lg" />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BooksSection({
+  books,
+  favoriteIndices,
+  favoritesCount,
+  onToggleFavorite,
+  mode,
+  onModeChange,
+  onRecommend,
+  recsLoading,
+}: {
+  books: Book[];
+  favoriteIndices: Set<number>;
+  favoritesCount: number;
+  onToggleFavorite: (i: number) => void;
+  mode: Mode;
+  onModeChange: (m: Mode) => void;
+  onRecommend: () => void;
+  recsLoading: boolean;
+}) {
+  if (books.length === 0) {
+    return (
+      <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
+        <p className="text-sm text-[var(--foreground-muted)]">
+          No books detected. Try a closer shot with even lighting.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <h2 className="font-serif text-2xl font-semibold text-[var(--foreground)]">
+          {books.length} {books.length === 1 ? "title" : "titles"} on the shelf
+        </h2>
+        <p className="text-sm text-[var(--foreground-muted)]">
+          Tap the heart on up to {MAX_FAVORITES} books you love — they become
+          taste anchors.{" "}
+          <span className="text-[var(--accent)] font-medium">
+            {favoritesCount}/{MAX_FAVORITES}
+          </span>{" "}
+          selected.
+        </p>
+      </div>
+
+      <ul className="flex flex-col gap-2">
+        {books.map((book, i) => {
+          const isFav = favoriteIndices.has(i);
+          const canFav = isFav || favoritesCount < MAX_FAVORITES;
+          return (
+            <li
+              key={`${book.title}-${i}`}
+              className={`flex items-start gap-3 rounded-xl border bg-[var(--surface)] px-4 py-3 transition-colors ${
+                isFav
+                  ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                  : "border-[var(--border)]"
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => onToggleFavorite(i)}
+                disabled={!canFav}
+                aria-label={isFav ? "Remove from favorites" : "Mark as favorite"}
+                className={`shrink-0 mt-0.5 text-xl leading-none transition ${
+                  isFav
+                    ? "opacity-100 scale-110"
+                    : canFav
+                      ? "opacity-30 hover:opacity-70"
+                      : "opacity-15 cursor-not-allowed"
+                }`}
+              >
+                {isFav ? "❤️" : "🤍"}
+              </button>
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="font-serif text-base font-medium text-[var(--foreground)] leading-snug">
+                  {book.title}
+                </span>
+                {book.author && (
+                  <span className="text-sm text-[var(--foreground-muted)]">
+                    {book.author}
+                  </span>
+                )}
+              </div>
+              <ConfidenceBadge level={book.confidence} />
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="flex flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <ModeToggle mode={mode} onChange={onModeChange} />
+        <button
+          type="button"
+          onClick={onRecommend}
+          disabled={recsLoading}
+          className="flex h-12 w-full items-center justify-center rounded-full bg-[var(--accent)] text-white font-medium transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {recsLoading
+            ? mode === "shadow"
+              ? "Finding the gap…"
+              : "Finding your next reads…"
+            : mode === "shadow"
+              ? "Build my shadow library"
+              : "Recommend next reads"}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -333,76 +445,147 @@ function ModeToggle({
   mode: Mode;
   onChange: (m: Mode) => void;
 }) {
+  const opts: { id: Mode; label: string; sub: string }[] = [
+    { id: "next", label: "Next reads", sub: "Safe · close to your taste" },
+    { id: "shadow", label: "Shadow library", sub: "Adventurous · find the gap" },
+  ];
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+      <span className="text-sm font-medium text-[var(--foreground)]">
         Recommendation mode
       </span>
-      <div
-        role="radiogroup"
-        className="grid grid-cols-2 rounded-full border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900"
-      >
-        <ToggleButton
-          active={mode === "next"}
-          onClick={() => onChange("next")}
-          label="Next reads"
-          sub="Safe"
-        />
-        <ToggleButton
-          active={mode === "shadow"}
-          onClick={() => onChange("shadow")}
-          label="Shadow library"
-          sub="Adventurous"
-        />
+      <div role="radiogroup" className="grid grid-cols-2 gap-2">
+        {opts.map((opt) => {
+          const active = mode === opt.id;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => onChange(opt.id)}
+              className={`flex flex-col items-start rounded-xl border p-3 text-left transition-colors ${
+                active
+                  ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                  : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--foreground-muted)]"
+              }`}
+            >
+              <span
+                className={`font-medium ${
+                  active ? "text-[var(--accent)]" : "text-[var(--foreground)]"
+                }`}
+              >
+                {opt.label}
+              </span>
+              <span className="text-xs text-[var(--foreground-muted)]">
+                {opt.sub}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function ToggleButton({
-  active,
-  onClick,
-  label,
-  sub,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  sub: string;
-}) {
+function RecsSkeleton() {
   return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      onClick={onClick}
-      className={`flex flex-col items-center justify-center rounded-full py-2 text-sm font-medium transition-colors ${
-        active
-          ? "bg-black text-white dark:bg-zinc-50 dark:text-black"
-          : "text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
-      }`}
-    >
-      <span>{label}</span>
-      <span
-        className={`text-[10px] uppercase tracking-wide ${
-          active ? "opacity-70" : "opacity-50"
-        }`}
-      >
-        {sub}
-      </span>
-    </button>
+    <section className="flex flex-col gap-4">
+      <div className="shimmer h-7 w-48 rounded-md" />
+      <div className="flex flex-col gap-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="flex gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div className="shimmer h-32 w-22 shrink-0 rounded-md" />
+            <div className="flex flex-1 flex-col gap-2">
+              <div className="shimmer h-5 w-3/4 rounded-md" />
+              <div className="shimmer h-4 w-1/2 rounded-md" />
+              <div className="shimmer h-12 w-full rounded-md" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RecsSection({ mode, recs }: { mode: Mode; recs: Recommendation[] }) {
+  if (recs.length === 0) {
+    return (
+      <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
+        <p className="text-sm text-[var(--foreground-muted)]">
+          No recommendations made it through validation. Try again with a
+          larger shelf for better signal.
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <p className="text-xs font-medium uppercase tracking-widest text-[var(--accent)]">
+          {mode === "shadow" ? "Shadow library" : "Next reads"}
+        </p>
+        <h2 className="font-serif text-2xl font-semibold text-[var(--foreground)]">
+          {mode === "shadow"
+            ? "Books your shelf implies you'd love"
+            : "Your safe next reads"}
+        </h2>
+      </div>
+
+      <ul className="flex flex-col gap-3">
+        {recs.map((rec, i) => (
+          <li
+            key={`${rec.title}-${i}`}
+            className="flex gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 transition-shadow hover:shadow-sm"
+          >
+            <div className="shrink-0 w-22 h-32 overflow-hidden rounded-md bg-[var(--accent-soft)] flex items-center justify-center shadow-sm">
+              {rec.cover_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={rec.cover_url}
+                  alt={`Cover of ${rec.title}`}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="text-xs text-[var(--foreground-muted)]">
+                  No cover
+                </span>
+              )}
+            </div>
+            <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+              <h3 className="font-serif text-lg font-semibold text-[var(--foreground)] leading-tight">
+                {rec.title}
+              </h3>
+              <p className="text-sm text-[var(--foreground-muted)]">
+                {rec.author}
+                {rec.first_publish_year ? ` · ${rec.first_publish_year}` : ""}
+              </p>
+              <blockquote className="border-l-2 border-[var(--accent)] pl-3 mt-1 font-serif italic text-[15px] text-[var(--foreground)] leading-snug">
+                {rec.why}
+              </blockquote>
+              <p className="text-xs text-[var(--foreground-muted)] mt-1">
+                Bridged from{" "}
+                <span className="font-medium text-[var(--foreground)]">
+                  {rec.bridge_title}
+                </span>
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
 function ConfidenceBadge({ level }: { level: Confidence }) {
   const styles: Record<Confidence, string> = {
-    high: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
-    medium: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-    low: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
+    high: "bg-[var(--accent-soft)] text-[var(--accent)]",
+    medium: "bg-[var(--accent-soft)] text-[var(--foreground-muted)]",
+    low: "bg-transparent border border-[var(--border)] text-[var(--foreground-muted)]",
   };
   return (
     <span
-      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${styles[level]}`}
+      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${styles[level]}`}
     >
       {level}
     </span>
@@ -411,8 +594,39 @@ function ConfidenceBadge({ level }: { level: Confidence }) {
 
 function ErrorBox({ message }: { message: string }) {
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
       {message}
     </div>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="border-t border-[var(--border)] py-6">
+      <div className="mx-auto flex max-w-2xl flex-col items-center gap-1 px-4 text-center text-xs text-[var(--foreground-muted)] sm:flex-row sm:justify-between">
+        <p>
+          Book data via{" "}
+          <a
+            href="https://openlibrary.org"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-[var(--foreground)]"
+          >
+            Open Library
+          </a>
+        </p>
+        <p>
+          Built in public ·{" "}
+          <a
+            href="https://github.com/ug4672/tsundoku"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-[var(--foreground)]"
+          >
+            GitHub
+          </a>
+        </p>
+      </div>
+    </footer>
   );
 }
