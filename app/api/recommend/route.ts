@@ -4,6 +4,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 type InputBook = { title: string; author?: string | null };
+type Mode = "next" | "shadow";
 
 type RecommendationFromModel = {
   title: string;
@@ -20,15 +21,28 @@ type OpenLibraryDoc = {
   key?: string;
 };
 
-const SYSTEM_PROMPT = `You are a thoughtful librarian recommending books to a reader based on their personal shelf.
+const NEXT_READS_PROMPT = `You are a thoughtful librarian recommending books to a reader based on their personal shelf.
 
-Given a list of books the reader owns, recommend 5 books they likely have NOT read but would love based on the themes, genres, and sensibilities of their collection.
+Recommend 5 books that the reader will safely love — natural next picks given the themes, genres, and sensibilities of their collection. Stay close to what they already enjoy.
 
 Rules:
 - Recommend real, published books only. Do not invent titles or authors.
 - Do NOT recommend any book that is already in the reader's shelf.
 - Each recommendation must reference one specific book on their shelf as the "bridge" — the closest book on their shelf that connects to your pick.
 - The "why" must be a single, specific sentence that explains the connection — not vague taste-talk.
+- Return ONLY valid JSON matching the schema. No prose.`;
+
+const SHADOW_LIBRARY_PROMPT = `You are an exceptional librarian who specializes in surfacing books a reader's collection IMPLIES they'd love but they'd never find on their own.
+
+Your job is to find the GAP. Look for the implied taste behind the explicit choices. Reach across genres and disciplines the reader only flirts with on this shelf. Surprise them — without ever being random.
+
+Rules:
+- Avoid the obvious adjacent pick. If they own Murakami, don't recommend another magic-realist novel — find what that taste reveals.
+- Cross genres. A reader of literary fiction + popular science is hungry for narrative non-fiction. A reader of philosophy + thrillers is hungry for taut political memoir. Look for the through-line.
+- Recommend real, published books only. Do not invent titles or authors.
+- Do NOT recommend any book that is already in the reader's shelf.
+- Each recommendation must reference one specific book on their shelf as the "bridge" — the book whose implied taste opens the door to your pick.
+- The "why" must be a single, sharp sentence that names the implied taste your pick satisfies — not vague comparison-talk.
 - Return ONLY valid JSON matching the schema. No prose.`;
 
 async function searchOpenLibrary(
@@ -54,6 +68,30 @@ async function searchOpenLibrary(
   }
 }
 
+function buildUserPrompt(
+  books: InputBook[],
+  favorites: string[],
+  mode: Mode
+): string {
+  const libraryDescription = books
+    .map((b) => `- ${b.title}${b.author ? ` by ${b.author}` : ""}`)
+    .join("\n");
+
+  const favoritesBlock =
+    favorites.length > 0
+      ? `\n\nThe reader has marked these as their TOP FAVORITES from the shelf — weigh these heaviest as taste anchors:\n${favorites
+          .map((t) => `- ${t}`)
+          .join("\n")}`
+      : "";
+
+  const closer =
+    mode === "shadow"
+      ? "Recommend 5 books that this shelf IMPLIES they'd love but they'd never find on their own. Find the gap."
+      : "Recommend 5 books they should read next.";
+
+  return `The reader's shelf:\n${libraryDescription}${favoritesBlock}\n\n${closer}`;
+}
+
 export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -63,7 +101,11 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { books?: InputBook[] };
+  let body: {
+    books?: InputBook[];
+    favorites?: string[];
+    mode?: Mode;
+  };
   try {
     body = await request.json();
   } catch {
@@ -78,9 +120,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const libraryDescription = books
-    .map((b) => `- ${b.title}${b.author ? ` by ${b.author}` : ""}`)
-    .join("\n");
+  const favorites = Array.isArray(body.favorites)
+    ? body.favorites.filter((s): s is string => typeof s === "string").slice(0, 5)
+    : [];
+
+  const mode: Mode = body.mode === "shadow" ? "shadow" : "next";
+  const systemPrompt =
+    mode === "shadow" ? SHADOW_LIBRARY_PROMPT : NEXT_READS_PROMPT;
+  const userPrompt = buildUserPrompt(books, favorites, mode);
 
   const ai = new GoogleGenAI({ apiKey });
 
@@ -91,12 +138,7 @@ export async function POST(request: Request) {
       contents: [
         {
           role: "user",
-          parts: [
-            { text: SYSTEM_PROMPT },
-            {
-              text: `The reader's shelf:\n${libraryDescription}\n\nRecommend 5 books they should read next.`,
-            },
-          ],
+          parts: [{ text: systemPrompt }, { text: userPrompt }],
         },
       ],
       config: {
@@ -162,5 +204,5 @@ export async function POST(request: Request) {
 
   const recommendations = validated.filter((r) => r !== null);
 
-  return Response.json({ recommendations });
+  return Response.json({ mode, recommendations });
 }

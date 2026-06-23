@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 type Confidence = "high" | "medium" | "low";
+type Mode = "next" | "shadow";
 
 type Book = {
   title: string;
@@ -20,6 +21,8 @@ type Recommendation = {
   bridge_title: string;
 };
 
+const MAX_FAVORITES = 5;
+
 export default function Home() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -28,14 +31,20 @@ export default function Home() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [books, setBooks] = useState<Book[] | null>(null);
 
+  const [favoriteIndices, setFavoriteIndices] = useState<Set<number>>(new Set());
+  const [mode, setMode] = useState<Mode>("next");
+
   const [recsLoading, setRecsLoading] = useState(false);
   const [recsError, setRecsError] = useState<string | null>(null);
+  const [recsMode, setRecsMode] = useState<Mode | null>(null);
   const [recs, setRecs] = useState<Recommendation[] | null>(null);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const next = e.target.files?.[0] ?? null;
     setBooks(null);
     setRecs(null);
+    setRecsMode(null);
+    setFavoriteIndices(new Set());
     setScanError(null);
     setRecsError(null);
     setFile(next);
@@ -49,6 +58,8 @@ export default function Home() {
     setScanError(null);
     setBooks(null);
     setRecs(null);
+    setRecsMode(null);
+    setFavoriteIndices(new Set());
 
     const fd = new FormData();
     fd.append("image", file);
@@ -68,11 +79,28 @@ export default function Home() {
     }
   }
 
+  function toggleFavorite(index: number) {
+    setFavoriteIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else if (next.size < MAX_FAVORITES) {
+        next.add(index);
+      }
+      return next;
+    });
+  }
+
   async function handleRecommend() {
     if (!books || books.length === 0) return;
     setRecsLoading(true);
     setRecsError(null);
     setRecs(null);
+    setRecsMode(null);
+
+    const favoritesList = Array.from(favoriteIndices)
+      .map((i) => books[i]?.title)
+      .filter((t): t is string => Boolean(t));
 
     try {
       const res = await fetch("/api/recommend", {
@@ -80,6 +108,8 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           books: books.map((b) => ({ title: b.title, author: b.author })),
+          favorites: favoritesList,
+          mode,
         }),
       });
       const data = await res.json();
@@ -87,6 +117,7 @@ export default function Home() {
         setRecsError(data.error ?? `Request failed (${res.status})`);
       } else {
         setRecs(data.recommendations ?? []);
+        setRecsMode(data.mode ?? mode);
       }
     } catch (err) {
       setRecsError(err instanceof Error ? err.message : "Network error");
@@ -94,6 +125,8 @@ export default function Home() {
       setRecsLoading(false);
     }
   }
+
+  const favoritesCount = favoriteIndices.size;
 
   return (
     <main className="flex min-h-screen flex-col items-center bg-zinc-50 px-4 py-10 dark:bg-black sm:px-6 sm:py-14">
@@ -104,8 +137,8 @@ export default function Home() {
             Tsundoku
           </h1>
           <p className="text-zinc-600 dark:text-zinc-400 max-w-sm">
-            Photograph a bookshelf to extract titles and get recommendations
-            based on what you already own.
+            Photograph a bookshelf. Get safe next reads — or a shadow library of
+            books your taste implies but you&apos;d never find on your own.
           </p>
         </header>
 
@@ -148,10 +181,18 @@ export default function Home() {
 
         {books && (
           <section className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-1">
               <h2 className="text-lg font-medium text-black dark:text-zinc-50">
                 Found {books.length} {books.length === 1 ? "book" : "books"}
               </h2>
+              {books.length > 0 && (
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  Tap the heart on up to {MAX_FAVORITES} books you love — they
+                  become taste anchors for the recommendations.
+                  {favoritesCount > 0 &&
+                    ` ${favoritesCount}/${MAX_FAVORITES} selected.`}
+                </p>
+              )}
             </div>
 
             {books.length === 0 ? (
@@ -161,36 +202,66 @@ export default function Home() {
             ) : (
               <>
                 <ul className="flex flex-col gap-2">
-                  {books.map((book, i) => (
-                    <li
-                      key={`${book.title}-${i}`}
-                      className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900"
-                    >
-                      <div className="flex flex-col">
-                        <span className="font-medium text-black dark:text-zinc-50">
-                          {book.title}
-                        </span>
-                        {book.author && (
-                          <span className="text-sm text-zinc-600 dark:text-zinc-400">
-                            {book.author}
+                  {books.map((book, i) => {
+                    const isFav = favoriteIndices.has(i);
+                    const canStillFav =
+                      isFav || favoritesCount < MAX_FAVORITES;
+                    return (
+                      <li
+                        key={`${book.title}-${i}`}
+                        className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleFavorite(i)}
+                          disabled={!canStillFav}
+                          aria-label={
+                            isFav ? "Remove from favorites" : "Mark as favorite"
+                          }
+                          className={`shrink-0 mt-0.5 text-xl leading-none transition ${
+                            isFav
+                              ? "opacity-100"
+                              : canStillFav
+                                ? "opacity-30 hover:opacity-70"
+                                : "opacity-15 cursor-not-allowed"
+                          }`}
+                        >
+                          {isFav ? "❤️" : "🤍"}
+                        </button>
+                        <div className="flex flex-col flex-1 min-w-0">
+                          <span className="font-medium text-black dark:text-zinc-50">
+                            {book.title}
                           </span>
-                        )}
-                      </div>
-                      <ConfidenceBadge level={book.confidence} />
-                    </li>
-                  ))}
+                          {book.author && (
+                            <span className="text-sm text-zinc-600 dark:text-zinc-400">
+                              {book.author}
+                            </span>
+                          )}
+                        </div>
+                        <ConfidenceBadge level={book.confidence} />
+                      </li>
+                    );
+                  })}
                 </ul>
 
-                <button
-                  type="button"
-                  onClick={handleRecommend}
-                  disabled={recsLoading}
-                  className="flex h-12 w-full items-center justify-center rounded-full border-2 border-black text-black font-medium transition-colors hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-50 dark:text-zinc-50 dark:hover:bg-zinc-50 dark:hover:text-black"
-                >
-                  {recsLoading
-                    ? "Finding your next reads…"
-                    : "Recommend next reads"}
-                </button>
+                <div className="flex flex-col gap-3">
+                  <ModeToggle mode={mode} onChange={setMode} />
+
+                  <button
+                    type="button"
+                    onClick={handleRecommend}
+                    disabled={recsLoading}
+                    className="flex h-12 w-full items-center justify-center rounded-full border-2 border-black text-black font-medium transition-colors hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-50 dark:text-zinc-50 dark:hover:bg-zinc-50 dark:hover:text-black"
+                  >
+                    {recsLoading
+                      ? mode === "shadow"
+                        ? "Finding the gap…"
+                        : "Finding your next reads…"
+                      : mode === "shadow"
+                        ? "Build my shadow library"
+                        : "Recommend next reads"}
+                  </button>
+                </div>
 
                 {recsError && <ErrorBox message={recsError} />}
               </>
@@ -201,7 +272,9 @@ export default function Home() {
         {recs && recs.length > 0 && (
           <section className="flex flex-col gap-4">
             <h2 className="text-lg font-medium text-black dark:text-zinc-50">
-              Your next {recs.length} reads
+              {recsMode === "shadow"
+                ? `Your shadow library · ${recs.length}`
+                : `Your next ${recs.length} reads`}
             </h2>
             <ul className="flex flex-col gap-3">
               {recs.map((rec, i) => (
@@ -250,6 +323,74 @@ export default function Home() {
         )}
       </div>
     </main>
+  );
+}
+
+function ModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: Mode;
+  onChange: (m: Mode) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        Recommendation mode
+      </span>
+      <div
+        role="radiogroup"
+        className="grid grid-cols-2 rounded-full border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900"
+      >
+        <ToggleButton
+          active={mode === "next"}
+          onClick={() => onChange("next")}
+          label="Next reads"
+          sub="Safe"
+        />
+        <ToggleButton
+          active={mode === "shadow"}
+          onClick={() => onChange("shadow")}
+          label="Shadow library"
+          sub="Adventurous"
+        />
+      </div>
+    </div>
+  );
+}
+
+function ToggleButton({
+  active,
+  onClick,
+  label,
+  sub,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  sub: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onClick}
+      className={`flex flex-col items-center justify-center rounded-full py-2 text-sm font-medium transition-colors ${
+        active
+          ? "bg-black text-white dark:bg-zinc-50 dark:text-black"
+          : "text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
+      }`}
+    >
+      <span>{label}</span>
+      <span
+        className={`text-[10px] uppercase tracking-wide ${
+          active ? "opacity-70" : "opacity-50"
+        }`}
+      >
+        {sub}
+      </span>
+    </button>
   );
 }
 
