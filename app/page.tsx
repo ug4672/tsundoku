@@ -10,58 +10,102 @@ type Book = {
   confidence: Confidence;
 };
 
-type ScanResponse = { books: Book[] } | { error: string };
+type Recommendation = {
+  title: string;
+  author: string;
+  first_publish_year: number | null;
+  cover_url: string | null;
+  open_library_key: string | null;
+  why: string;
+  bridge_title: string;
+};
 
 export default function Home() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [books, setBooks] = useState<Book[] | null>(null);
+
+  const [recsLoading, setRecsLoading] = useState(false);
+  const [recsError, setRecsError] = useState<string | null>(null);
+  const [recs, setRecs] = useState<Recommendation[] | null>(null);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const next = e.target.files?.[0] ?? null;
     setBooks(null);
-    setError(null);
+    setRecs(null);
+    setScanError(null);
+    setRecsError(null);
     setFile(next);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(next ? URL.createObjectURL(next) : null);
   }
 
-  async function handleSubmit() {
+  async function handleExtract() {
     if (!file) return;
-    setLoading(true);
-    setError(null);
+    setScanLoading(true);
+    setScanError(null);
     setBooks(null);
+    setRecs(null);
 
     const fd = new FormData();
     fd.append("image", file);
 
     try {
       const res = await fetch("/api/scan", { method: "POST", body: fd });
-      const data: ScanResponse = await res.json();
-      if (!res.ok || "error" in data) {
-        setError("error" in data ? data.error : `Request failed (${res.status})`);
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setScanError(data.error ?? `Request failed (${res.status})`);
       } else {
-        setBooks(data.books);
+        setBooks(data.books ?? []);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Network error");
+      setScanError(err instanceof Error ? err.message : "Network error");
     } finally {
-      setLoading(false);
+      setScanLoading(false);
+    }
+  }
+
+  async function handleRecommend() {
+    if (!books || books.length === 0) return;
+    setRecsLoading(true);
+    setRecsError(null);
+    setRecs(null);
+
+    try {
+      const res = await fetch("/api/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          books: books.map((b) => ({ title: b.title, author: b.author })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setRecsError(data.error ?? `Request failed (${res.status})`);
+      } else {
+        setRecs(data.recommendations ?? []);
+      }
+    } catch (err) {
+      setRecsError(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setRecsLoading(false);
     }
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-black">
-      <div className="w-full max-w-2xl flex flex-col gap-8">
+    <main className="flex min-h-screen flex-col items-center bg-zinc-50 px-4 py-10 dark:bg-black sm:px-6 sm:py-14">
+      <div className="w-full max-w-2xl flex flex-col gap-10">
         <header className="flex flex-col items-center gap-3 text-center">
           <div className="text-4xl">📚</div>
           <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-zinc-50">
             Tsundoku
           </h1>
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Photograph a bookshelf to extract every title you can see.
+          <p className="text-zinc-600 dark:text-zinc-400 max-w-sm">
+            Photograph a bookshelf to extract titles and get recommendations
+            based on what you already own.
           </p>
         </header>
 
@@ -85,58 +129,124 @@ export default function Home() {
               <img
                 src={previewUrl}
                 alt="Bookshelf preview"
-                className="w-full max-h-96 object-contain bg-zinc-100 dark:bg-zinc-900"
+                className="w-full max-h-80 object-contain bg-zinc-100 dark:bg-zinc-900"
               />
             </div>
           )}
 
           <button
             type="button"
-            onClick={handleSubmit}
-            disabled={!file || loading}
+            onClick={handleExtract}
+            disabled={!file || scanLoading}
             className="flex h-12 w-full items-center justify-center rounded-full bg-black text-white font-medium transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-50 dark:text-black dark:hover:bg-zinc-200"
           >
-            {loading ? "Reading spines…" : "Extract books"}
+            {scanLoading ? "Reading spines…" : "Extract books"}
           </button>
 
-          {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-              {error}
-            </div>
-          )}
+          {scanError && <ErrorBox message={scanError} />}
         </section>
 
         {books && (
-          <section className="flex flex-col gap-3">
-            <h2 className="text-lg font-medium text-black dark:text-zinc-50">
-              Found {books.length} {books.length === 1 ? "book" : "books"}
-            </h2>
-            <ul className="flex flex-col gap-2">
-              {books.map((book, i) => (
-                <li
-                  key={`${book.title}-${i}`}
-                  className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900"
-                >
-                  <div className="flex flex-col">
-                    <span className="font-medium text-black dark:text-zinc-50">
-                      {book.title}
-                    </span>
-                    {book.author && (
-                      <span className="text-sm text-zinc-600 dark:text-zinc-400">
-                        {book.author}
-                      </span>
-                    )}
-                  </div>
-                  <ConfidenceBadge level={book.confidence} />
-                </li>
-              ))}
-            </ul>
-            {books.length === 0 && (
+          <section className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-medium text-black dark:text-zinc-50">
+                Found {books.length} {books.length === 1 ? "book" : "books"}
+              </h2>
+            </div>
+
+            {books.length === 0 ? (
               <p className="text-sm text-zinc-500 dark:text-zinc-400">
                 No books detected. Try a closer shot with even lighting.
               </p>
+            ) : (
+              <>
+                <ul className="flex flex-col gap-2">
+                  {books.map((book, i) => (
+                    <li
+                      key={`${book.title}-${i}`}
+                      className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900"
+                    >
+                      <div className="flex flex-col">
+                        <span className="font-medium text-black dark:text-zinc-50">
+                          {book.title}
+                        </span>
+                        {book.author && (
+                          <span className="text-sm text-zinc-600 dark:text-zinc-400">
+                            {book.author}
+                          </span>
+                        )}
+                      </div>
+                      <ConfidenceBadge level={book.confidence} />
+                    </li>
+                  ))}
+                </ul>
+
+                <button
+                  type="button"
+                  onClick={handleRecommend}
+                  disabled={recsLoading}
+                  className="flex h-12 w-full items-center justify-center rounded-full border-2 border-black text-black font-medium transition-colors hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-50 dark:text-zinc-50 dark:hover:bg-zinc-50 dark:hover:text-black"
+                >
+                  {recsLoading
+                    ? "Finding your next reads…"
+                    : "Recommend next reads"}
+                </button>
+
+                {recsError && <ErrorBox message={recsError} />}
+              </>
             )}
           </section>
+        )}
+
+        {recs && recs.length > 0 && (
+          <section className="flex flex-col gap-4">
+            <h2 className="text-lg font-medium text-black dark:text-zinc-50">
+              Your next {recs.length} reads
+            </h2>
+            <ul className="flex flex-col gap-3">
+              {recs.map((rec, i) => (
+                <li
+                  key={`${rec.title}-${i}`}
+                  className="flex gap-4 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                  <div className="shrink-0 w-20 h-28 bg-zinc-100 dark:bg-zinc-800 rounded-md overflow-hidden flex items-center justify-center">
+                    {rec.cover_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={rec.cover_url}
+                        alt={`Cover of ${rec.title}`}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-xs text-zinc-400">No cover</span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <h3 className="font-medium text-black dark:text-zinc-50 leading-tight">
+                      {rec.title}
+                    </h3>
+                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                      {rec.author}
+                      {rec.first_publish_year ? ` · ${rec.first_publish_year}` : ""}
+                    </p>
+                    <p className="text-sm text-zinc-700 dark:text-zinc-300 mt-1 leading-snug">
+                      {rec.why}
+                    </p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-500 mt-1 italic">
+                      Bridge: {rec.bridge_title}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {recs && recs.length === 0 && (
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            No recommendations made it through validation. Try again with a
+            larger shelf for better signal.
+          </p>
         )}
       </div>
     </main>
@@ -155,5 +265,13 @@ function ConfidenceBadge({ level }: { level: Confidence }) {
     >
       {level}
     </span>
+  );
+}
+
+function ErrorBox({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+      {message}
+    </div>
   );
 }

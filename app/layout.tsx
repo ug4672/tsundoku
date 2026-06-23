@@ -15,6 +15,17 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Tsundoku",
   description: "Photograph your bookshelf, get recommendations from what you own.",
+  appleWebApp: {
+    capable: true,
+    title: "Tsundoku",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport = {
+  themeColor: "#000000",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
